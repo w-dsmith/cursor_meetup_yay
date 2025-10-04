@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Concert MCP Server</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .search-section {
+            margin-bottom: 40px;
+        }
+
+        .search-tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .tab {
+            padding: 15px 25px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            color: #ff6b6b;
+            border-bottom-color: #ff6b6b;
+        }
+
+        .tab:hover {
+            color: #ff6b6b;
+        }
+
+        .search-form {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #ff6b6b;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .search-btn {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+            width: 100%;
+        }
+
+        .search-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .search-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .results {
+            margin-top: 30px;
+        }
+
+        .subreddit-section {
+            margin-bottom: 30px;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .subreddit-header {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .post {
+            padding: 20px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .post:last-child {
+            border-bottom: none;
+        }
+
+        .post-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .post-title a {
+            color: #ff6b6b;
+            text-decoration: none;
+        }
+
+        .post-title a:hover {
+            text-decoration: underline;
+        }
+
+        .post-meta {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .post-text {
+            color: #555;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+
+        .post-dates {
+            background: #e8f4fd;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        .post-dates strong {
+            color: #1976d2;
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 18px;
+        }
+
+        .stats {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .stats h3 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .stats p {
+            color: #666;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎵 Concert MCP Server</h1>
+            <p>Search Reddit for concert information, setlists, and EDM events</p>
+        </div>
+
+        <div class="content">
+            <div class="search-section">
+                <div class="search-tabs">
+                    <button class="tab active" onclick="switchTab('concerts')">Concerts</button>
+                    <button class="tab" onclick="switchTab('setlist')">Setlists</button>
+                    <button class="tab" onclick="switchTab('edm')">EDM Events</button>
+                </div>
+
+                <!-- Concerts Tab -->
+                <div id="concerts-tab" class="tab-content">
+                    <div class="search-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="artist">Artist Name *</label>
+                                <input type="text" id="artist" placeholder="e.g., Taylor Swift" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="location">Location (optional)</label>
+                                <input type="text" id="location" placeholder="e.g., New York, Madison Square Garden">
+                            </div>
+                        </div>
+                        <button class="search-btn" onclick="searchConcerts()">Search Concerts</button>
+                    </div>
+                </div>
+
+                <!-- Setlist Tab -->
+                <div id="setlist-tab" class="tab-content" style="display: none;">
+                    <div class="search-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="setlist-artist">Artist Name *</label>
+                                <input type="text" id="setlist-artist" placeholder="e.g., Deadmau5" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="venue">Venue (optional)</label>
+                                <input type="text" id="venue" placeholder="e.g., Ultra Music Festival">
+                            </div>
+                        </div>
+                        <button class="search-btn" onclick="searchSetlist()">Search Setlists</button>
+                    </div>
+                </div>
+
+                <!-- EDM Tab -->
+                <div id="edm-tab" class="tab-content" style="display: none;">
+                    <div class="search-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="edm-artist">EDM Artist *</label>
+                                <input type="text" id="edm-artist" placeholder="e.g., Skrillex" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="festival">Festival (optional)</label>
+                                <input type="text" id="festival" placeholder="e.g., EDC, UMF">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="edm-location">Location (optional)</label>
+                            <input type="text" id="edm-location" placeholder="e.g., Las Vegas">
+                        </div>
+                        <button class="search-btn" onclick="searchEDM()">Search EDM Events</button>
+                    </div>
+                </div>
+
+                <div id="loading" class="loading" style="display: none;">
+                    🔍 Searching Reddit...
+                </div>
+
+                <div id="results"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.style.display = 'none';
+            });
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName + '-tab').style.display = 'block';
+            
+            // Add active class to clicked tab
+            event.target.classList.add('active');
+        }
+
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').innerHTML = '';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function showError(message) {
+            document.getElementById('results').innerHTML = `
+                <div class="error">
+                    <strong>Error:</strong> ${message}
+                </div>
+            `;
+        }
+
+        function searchConcerts() {
+            const artist = document.getElementById('artist').value.trim();
+            const location = document.getElementById('location').value.trim();
+            
+            if (!artist) {
+                alert('Please enter an artist name');
+                return;
+            }
+            
+            showLoading();
+            
+            fetch('/api/search', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    artist: artist,
+                    location: location || null
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideLoading();
+                if (data.error) {
+                    showError(data.error);
+                } else {
+                    displayResults(data, 'concert');
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                showError('Search failed: ' + error.message);
+            });
+        }
+
+        function searchSetlist() {
+            const artist = document.getElementById('setlist-artist').value.trim();
+            const venue = document.getElementById('venue').value.trim();
+            
+            if (!artist) {
+                alert('Please enter an artist name');
+                return;
+            }
+            
+            showLoading();
+            
+            fetch('/api/setlist', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    artist: artist,
+                    venue: venue || null
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideLoading();
+                if (data.error) {
+                    showError(data.error);
+                } else {
+                    displayResults(data, 'setlist');
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                showError('Search failed: ' + error.message);
+            });
+        }
+
+        function searchEDM() {
+            const artist = document.getElementById('edm-artist').value.trim();
+            const festival = document.getElementById('festival').value.trim();
+            const location = document.getElementById('edm-location').value.trim();
+            
+            if (!artist) {
+                alert('Please enter an artist name');
+                return;
+            }
+            
+            showLoading();
+            
+            fetch('/api/edm', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    artist: artist,
+                    festival: festival || null,
+                    location: location || null
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideLoading();
+                if (data.error) {
+                    showError(data.error);
+                } else {
+                    displayResults(data, 'edm');
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                showError('Search failed: ' + error.message);
+            });
+        }
+
+        function displayResults(data, type) {
+            const resultsDiv = document.getElementById('results');
+            
+            if (!data.results || Object.keys(data.results).length === 0) {
+                resultsDiv.innerHTML = `
+                    <div class="no-results">
+                        No results found for "${data.artist}"
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `
+                <div class="stats">
+                    <h3>Search Results</h3>
+                    <p><strong>Artist:</strong> ${data.artist}</p>
+                    <p><strong>Subreddits searched:</strong> ${data.total_subreddits}</p>
+                    <p><strong>Total posts found:</strong> ${data.total_posts}</p>
+                </div>
+            `;
+
+            for (const [subreddit, posts] of Object.entries(data.results)) {
+                html += `
+                    <div class="subreddit-section">
+                        <div class="subreddit-header">
+                            r/${subreddit} (${posts.length} posts)
+                        </div>
+                `;
+
+                posts.forEach(post => {
+                    html += `
+                        <div class="post">
+                            <div class="post-title">
+                                <a href="${post.url}" target="_blank">${post.title}</a>
+                            </div>
+                            <div class="post-meta">
+                                <span>⭐ ${post.score} points</span>
+                                <span>👤 ${post.author}</span>
+                                <span>📅 ${new Date(post.created_utc).toLocaleDateString()}</span>
+                            </div>
+                            <div class="post-text">${post.text}</div>
+                            ${post.dates_found.length > 0 || post.times_found.length > 0 ? `
+                                <div class="post-dates">
+                                    ${post.dates_found.length > 0 ? `<strong>Dates:</strong> ${post.dates_found.join(', ')}<br>` : ''}
+                                    ${post.times_found.length > 0 ? `<strong>Times:</strong> ${post.times_found.join(', ')}` : ''}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+
+                html += '</div>';
+            }
+
+            resultsDiv.innerHTML = html;
+        }
+    </script>
+</body>
+</html>
