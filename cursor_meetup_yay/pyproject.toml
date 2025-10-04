@@ -1,11 +1,14 @@
 [project]
-name = "cursor-mcp-server"
+name = "concert-mcp-server"
 version = "0.1.0"
-description = "A basic MCP server for Cursor"
+description = "MCP server for concert information scraping from Reddit"
 requires-python = ">=3.10"
 dependencies = [
     "mcp",
+    "praw>=7.7.1",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
 ]
 
 [project.scripts]
-cursor-mcp-server = "mcp_server:main"
+concert-mcp-server = "mcp_server:main"

@@ -1,18 +1,171 @@
 #!/usr/bin/env python3
 """
-Basic MCP (Model Context Protocol) Server
+Concert Information MCP Server - Reddit Scraper
+Scrapes Reddit for concert information from specific subreddits
 """
 
 import asyncio
 import json
-from typing import Any, Sequence
+import os
+import re
+from datetime import datetime, timedelta
+from typing import Any, Sequence, Dict, List, Optional
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from mcp.server.stdio import stdio_server
+import praw
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
+
+# Concert-related subreddits to search
+CONCERT_SUBREDDITS = [
+    "concert",
+    "edm", 
+    "livemusic",
+    "UMF",
+    "setlist",
+    "festivals",
+    "electronicmusic",
+    "aves",
+    "edmprodcirclejerk",
+    "electronicdancemusic"
+]
+
+class RedditConcertScraper:
+    """Reddit scraper for concert information"""
+    
+    def __init__(self):
+        self.reddit = None
+        self._initialize_reddit()
+    
+    def _initialize_reddit(self):
+        """Initialize Reddit API client with OAuth"""
+        try:
+            self.reddit = praw.Reddit(
+                client_id=os.getenv("REDDIT_CLIENT_ID"),
+                client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+                user_agent="ConcertMCPBot/1.0 by ConcertInfoBot",
+                username=os.getenv("REDDIT_USERNAME"),
+                password=os.getenv("REDDIT_PASSWORD")
+            )
+            # Test the connection
+            self.reddit.user.me()
+        except Exception as e:
+            print(f"Reddit authentication failed: {e}")
+            self.reddit = None
+    
+    def search_concerts(self, artist: str, location: str = None, date_range: str = "30") -> Dict[str, List[Dict]]:
+        """Search for concert information across multiple subreddits"""
+        if not self.reddit:
+            return {"error": "Reddit API not initialized. Please check credentials."}
+        
+        results = {}
+        search_terms = self._generate_search_terms(artist, location)
+        
+        for subreddit_name in CONCERT_SUBREDDITS:
+            try:
+                subreddit = self.reddit.subreddit(subreddit_name)
+                subreddit_results = []
+                
+                # Search in subreddit
+                for submission in subreddit.search(f"{artist} {location or ''}", 
+                                                time_filter="month", 
+                                                limit=10):
+                    if self._is_relevant_post(submission, artist, location):
+                        subreddit_results.append(self._extract_concert_info(submission))
+                
+                if subreddit_results:
+                    results[subreddit_name] = subreddit_results
+                    
+            except Exception as e:
+                print(f"Error searching r/{subreddit_name}: {e}")
+                continue
+        
+        return results
+    
+    def _generate_search_terms(self, artist: str, location: str = None) -> List[str]:
+        """Generate various search term combinations"""
+        terms = [artist]
+        if location:
+            terms.extend([f"{artist} {location}", f"{location} {artist}"])
+        
+        # Add common concert-related terms
+        concert_terms = ["concert", "show", "tour", "festival", "setlist", "live"]
+        for term in concert_terms:
+            terms.extend([f"{artist} {term}", f"{term} {artist}"])
+            if location:
+                terms.extend([f"{artist} {term} {location}", f"{location} {artist} {term}"])
+        
+        return terms
+    
+    def _is_relevant_post(self, submission, artist: str, location: str = None) -> bool:
+        """Check if a post is relevant to the concert search"""
+        text = f"{submission.title} {submission.selftext}".lower()
+        artist_lower = artist.lower()
+        
+        # Must contain artist name
+        if artist_lower not in text:
+            return False
+        
+        # If location specified, should contain location
+        if location and location.lower() not in text:
+            return False
+        
+        # Look for concert-related keywords
+        concert_keywords = [
+            "concert", "show", "tour", "festival", "setlist", "live", 
+            "venue", "tickets", "date", "time", "schedule", "lineup"
+        ]
+        
+        return any(keyword in text for keyword in concert_keywords)
+    
+    def _extract_concert_info(self, submission) -> Dict:
+        """Extract relevant concert information from a Reddit post"""
+        # Extract dates and times using regex
+        date_patterns = [
+            r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',  # MM/DD/YYYY or DD/MM/YYYY
+            r'(\d{4}[/-]\d{1,2}[/-]\d{1,2})',  # YYYY/MM/DD
+            r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{4}',
+            r'(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})'
+        ]
+        
+        time_patterns = [
+            r'(\d{1,2}:\d{2}\s*(?:am|pm|AM|PM)?)',
+            r'(\d{1,2}\s*(?:am|pm|AM|PM))',
+            r'(doors?\s+(?:at\s+)?\d{1,2}:\d{2})',
+            r'(show\s+(?:at\s+)?\d{1,2}:\d{2})'
+        ]
+        
+        text = f"{submission.title} {submission.selftext}"
+        
+        dates = []
+        times = []
+        
+        for pattern in date_patterns:
+            dates.extend(re.findall(pattern, text, re.IGNORECASE))
+        
+        for pattern in time_patterns:
+            times.extend(re.findall(pattern, text, re.IGNORECASE))
+        
+        return {
+            "title": submission.title,
+            "url": f"https://reddit.com{submission.permalink}",
+            "subreddit": submission.subreddit.display_name,
+            "score": submission.score,
+            "created_utc": datetime.fromtimestamp(submission.created_utc).isoformat(),
+            "text": submission.selftext[:500] + "..." if len(submission.selftext) > 500 else submission.selftext,
+            "dates_found": dates,
+            "times_found": times,
+            "author": str(submission.author) if submission.author else "[deleted]"
+        }
+
+# Initialize Reddit scraper
+reddit_scraper = RedditConcertScraper()
 
 # Initialize MCP server
-app = Server("example-mcp-server")
+app = Server("concert-mcp-server")
 
 
 @app.list_tools()
@@ -20,35 +173,84 @@ async def list_tools() -> list[Tool]:
     """List available tools."""
     return [
         Tool(
-            name="echo",
-            description="Echoes back the provided message",
+            name="search_concerts",
+            description="Search Reddit for concert information including set times, venues, and dates",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "message": {
+                    "artist": {
                         "type": "string",
-                        "description": "The message to echo back",
+                        "description": "Artist or band name to search for (required)",
+                    },
+                    "location": {
+                        "type": "string", 
+                        "description": "City, state, or venue location (optional)",
+                    },
+                    "date_range": {
+                        "type": "string",
+                        "description": "Number of days to search back (default: 30)",
+                        "default": "30"
                     }
                 },
-                "required": ["message"],
+                "required": ["artist"],
             },
         ),
         Tool(
-            name="add",
-            description="Adds two numbers together",
+            name="get_setlist_info",
+            description="Get detailed setlist information for a specific artist from Reddit",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "a": {
-                        "type": "number",
-                        "description": "First number",
+                    "artist": {
+                        "type": "string",
+                        "description": "Artist name to get setlist for",
                     },
-                    "b": {
-                        "type": "number",
-                        "description": "Second number",
+                    "venue": {
+                        "type": "string",
+                        "description": "Specific venue or festival name (optional)",
                     }
                 },
-                "required": ["a", "b"],
+                "required": ["artist"],
+            },
+        ),
+        Tool(
+            name="search_edm_events",
+            description="Search specifically for EDM events, festivals, and electronic music concerts",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artist": {
+                        "type": "string",
+                        "description": "EDM artist or DJ name",
+                    },
+                    "festival": {
+                        "type": "string",
+                        "description": "Festival name (e.g., UMF, EDC, Tomorrowland)",
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "City or venue location",
+                    }
+                },
+                "required": ["artist"],
+            },
+        ),
+        Tool(
+            name="get_concert_dates",
+            description="Extract specific concert dates and times from Reddit posts",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artist": {
+                        "type": "string",
+                        "description": "Artist name",
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Location to filter by",
+                    }
+                },
+                "required": ["artist"],
             },
         ),
     ]
@@ -57,15 +259,285 @@ async def list_tools() -> list[Tool]:
 @app.call_tool()
 async def call_tool(name: str, arguments: Any) -> Sequence[TextContent]:
     """Handle tool calls."""
-    if name == "echo":
-        message = arguments.get("message", "")
-        return [TextContent(type="text", text=f"Echo: {message}")]
+    
+    if name == "search_concerts":
+        artist = arguments.get("artist", "")
+        location = arguments.get("location")
+        date_range = arguments.get("date_range", "30")
+        
+        if not artist:
+            return [TextContent(type="text", text="Error: Artist name is required")]
+        
+        # System prompt for concert search
+        system_prompt = f"""
+        🎵 CONCERT SEARCH SYSTEM PROMPT 🎵
+        
+        Searching for: {artist}
+        Location: {location or "Any"}
+        Date Range: Last {date_range} days
+        
+        TARGET SUBREDDITS: /concert, /edm, /livemusic, /UMF, /setlist, /festivals, /electronicmusic, /aves
+        
+        SEARCH FOCUS:
+        - Concert dates and times
+        - Venue information
+        - Set times and schedules
+        - Ticket availability
+        - Festival lineups
+        - Live music events
+        
+        FILTERING CRITERIA:
+        - Must contain artist name: {artist}
+        - Location match: {location or "Any location"}
+        - Concert-related keywords: concert, show, tour, festival, setlist, live, venue, tickets, date, time, schedule, lineup
+        """
+        
+        try:
+            results = reddit_scraper.search_concerts(artist, location, date_range)
+            
+            if "error" in results:
+                return [TextContent(type="text", text=f"Error: {results['error']}")]
+            
+            if not results:
+                return [TextContent(type="text", text=f"No concert information found for {artist} in the specified subreddits.")]
+            
+            # Format results
+            response = f"{system_prompt}\n\n🎤 CONCERT SEARCH RESULTS FOR: {artist.upper()}\n"
+            response += "=" * 60 + "\n\n"
+            
+            for subreddit, posts in results.items():
+                response += f"📱 r/{subreddit}:\n"
+                response += "-" * 30 + "\n"
+                
+                for i, post in enumerate(posts[:3], 1):  # Limit to top 3 per subreddit
+                    response += f"{i}. {post['title']}\n"
+                    response += f"   🔗 {post['url']}\n"
+                    response += f"   ⭐ Score: {post['score']}\n"
+                    response += f"   📅 Posted: {post['created_utc']}\n"
+                    
+                    if post['dates_found']:
+                        response += f"   📅 Dates: {', '.join(post['dates_found'])}\n"
+                    
+                    if post['times_found']:
+                        response += f"   ⏰ Times: {', '.join(post['times_found'])}\n"
+                    
+                    if post['text']:
+                        response += f"   📝 Preview: {post['text'][:200]}...\n"
+                    
+                    response += "\n"
+                
+                response += "\n"
+            
+            return [TextContent(type="text", text=response)]
+            
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error searching concerts: {str(e)}")]
 
-    elif name == "add":
-        a = arguments.get("a", 0)
-        b = arguments.get("b", 0)
-        result = a + b
-        return [TextContent(type="text", text=f"Result: {result}")]
+    elif name == "get_setlist_info":
+        artist = arguments.get("artist", "")
+        venue = arguments.get("venue")
+        
+        if not artist:
+            return [TextContent(type="text", text="Error: Artist name is required")]
+        
+        # System prompt for setlist search
+        system_prompt = f"""
+        🎼 SETLIST SEARCH SYSTEM PROMPT 🎼
+        
+        Searching for setlist information for: {artist}
+        Venue: {venue or "Any venue"}
+        
+        TARGET SUBREDDITS: /setlist, /concert, /edm, /livemusic, /UMF
+        
+        SEARCH FOCUS:
+        - Song lists and setlists
+        - Track order and timing
+        - Encore information
+        - Special performances
+        - Set duration and structure
+        """
+        
+        try:
+            # Search specifically in setlist-related subreddits
+            setlist_subreddits = ["setlist", "concert", "edm", "livemusic", "UMF"]
+            results = {}
+            
+            for subreddit_name in setlist_subreddits:
+                try:
+                    subreddit = reddit_scraper.reddit.subreddit(subreddit_name)
+                    subreddit_results = []
+                    
+                    search_query = f"{artist} setlist"
+                    if venue:
+                        search_query += f" {venue}"
+                    
+                    for submission in subreddit.search(search_query, time_filter="month", limit=5):
+                        if "setlist" in submission.title.lower() or "setlist" in submission.selftext.lower():
+                            subreddit_results.append(reddit_scraper._extract_concert_info(submission))
+                    
+                    if subreddit_results:
+                        results[subreddit_name] = subreddit_results
+                        
+                except Exception as e:
+                    continue
+            
+            if not results:
+                return [TextContent(type="text", text=f"No setlist information found for {artist}")]
+            
+            response = f"{system_prompt}\n\n🎼 SETLIST RESULTS FOR: {artist.upper()}\n"
+            response += "=" * 50 + "\n\n"
+            
+            for subreddit, posts in results.items():
+                response += f"📱 r/{subreddit}:\n"
+                response += "-" * 25 + "\n"
+                
+                for i, post in enumerate(posts, 1):
+                    response += f"{i}. {post['title']}\n"
+                    response += f"   🔗 {post['url']}\n"
+                    response += f"   ⭐ Score: {post['score']}\n"
+                    if post['text']:
+                        response += f"   📝 Setlist: {post['text'][:300]}...\n"
+                    response += "\n"
+                
+                response += "\n"
+            
+            return [TextContent(type="text", text=response)]
+            
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error searching setlists: {str(e)}")]
+
+    elif name == "search_edm_events":
+        artist = arguments.get("artist", "")
+        festival = arguments.get("festival")
+        location = arguments.get("location")
+        
+        if not artist:
+            return [TextContent(type="text", text="Error: Artist name is required")]
+        
+        # System prompt for EDM search
+        system_prompt = f"""
+        🎧 EDM EVENT SEARCH SYSTEM PROMPT 🎧
+        
+        Searching for EDM events for: {artist}
+        Festival: {festival or "Any festival"}
+        Location: {location or "Any location"}
+        
+        TARGET SUBREDDITS: /edm, /UMF, /electronicmusic, /aves, /festivals, /edmprodcirclejerk
+        
+        SEARCH FOCUS:
+        - EDM festivals and events
+        - DJ sets and performances
+        - Electronic music concerts
+        - Festival lineups and schedules
+        - Club events and raves
+        - Set times and stage information
+        """
+        
+        try:
+            # Search in EDM-specific subreddits
+            edm_subreddits = ["edm", "UMF", "electronicmusic", "aves", "festivals", "edmprodcirclejerk"]
+            results = {}
+            
+            search_query = artist
+            if festival:
+                search_query += f" {festival}"
+            if location:
+                search_query += f" {location}"
+            
+            for subreddit_name in edm_subreddits:
+                try:
+                    subreddit = reddit_scraper.reddit.subreddit(subreddit_name)
+                    subreddit_results = []
+                    
+                    for submission in subreddit.search(search_query, time_filter="month", limit=5):
+                        if reddit_scraper._is_relevant_post(submission, artist, location):
+                            subreddit_results.append(reddit_scraper._extract_concert_info(submission))
+                    
+                    if subreddit_results:
+                        results[subreddit_name] = subreddit_results
+                        
+                except Exception as e:
+                    continue
+            
+            if not results:
+                return [TextContent(type="text", text=f"No EDM events found for {artist}")]
+            
+            response = f"{system_prompt}\n\n🎧 EDM EVENT RESULTS FOR: {artist.upper()}\n"
+            response += "=" * 50 + "\n\n"
+            
+            for subreddit, posts in results.items():
+                response += f"📱 r/{subreddit}:\n"
+                response += "-" * 25 + "\n"
+                
+                for i, post in enumerate(posts, 1):
+                    response += f"{i}. {post['title']}\n"
+                    response += f"   🔗 {post['url']}\n"
+                    response += f"   ⭐ Score: {post['score']}\n"
+                    if post['dates_found']:
+                        response += f"   📅 Dates: {', '.join(post['dates_found'])}\n"
+                    if post['times_found']:
+                        response += f"   ⏰ Times: {', '.join(post['times_found'])}\n"
+                    response += "\n"
+                
+                response += "\n"
+            
+            return [TextContent(type="text", text=response)]
+            
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error searching EDM events: {str(e)}")]
+
+    elif name == "get_concert_dates":
+        artist = arguments.get("artist", "")
+        location = arguments.get("location")
+        
+        if not artist:
+            return [TextContent(type="text", text="Error: Artist name is required")]
+        
+        try:
+            results = reddit_scraper.search_concerts(artist, location)
+            
+            if "error" in results:
+                return [TextContent(type="text", text=f"Error: {results['error']}")]
+            
+            if not results:
+                return [TextContent(type="text", text=f"No concert dates found for {artist}")]
+            
+            # Extract and format dates
+            response = f"📅 CONCERT DATES FOR: {artist.upper()}\n"
+            response += "=" * 40 + "\n\n"
+            
+            all_dates = []
+            for subreddit, posts in results.items():
+                for post in posts:
+                    if post['dates_found']:
+                        for date in post['dates_found']:
+                            all_dates.append({
+                                'date': date,
+                                'title': post['title'],
+                                'subreddit': subreddit,
+                                'url': post['url'],
+                                'times': post['times_found']
+                            })
+            
+            if not all_dates:
+                return [TextContent(type="text", text=f"No specific dates found for {artist}")]
+            
+            # Sort by date (basic sorting)
+            all_dates.sort(key=lambda x: x['date'])
+            
+            for i, date_info in enumerate(all_dates[:10], 1):  # Limit to 10 results
+                response += f"{i}. {date_info['date']}\n"
+                response += f"   📝 {date_info['title']}\n"
+                response += f"   📱 r/{date_info['subreddit']}\n"
+                response += f"   🔗 {date_info['url']}\n"
+                if date_info['times']:
+                    response += f"   ⏰ Times: {', '.join(date_info['times'])}\n"
+                response += "\n"
+            
+            return [TextContent(type="text", text=response)]
+            
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error getting concert dates: {str(e)}")]
 
     else:
         raise ValueError(f"Unknown tool: {name}")
