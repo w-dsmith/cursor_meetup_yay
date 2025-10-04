@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import re
+import logging
 from datetime import datetime, timedelta
 from typing import Any, Sequence, Dict, List, Optional
 from mcp.server import Server
@@ -15,6 +16,17 @@ from mcp.types import Tool, TextContent
 from mcp.server.stdio import stdio_server
 import praw
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('mcp_server.log')
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -41,48 +53,153 @@ class RedditConcertScraper:
         self._initialize_reddit()
     
     def _initialize_reddit(self):
-        """Initialize Reddit API client with OAuth"""
+        """Initialize Reddit API client with OAuth2 (client credentials only)"""
+        logger.info("Initializing Reddit API connection...")
+        
+        # Check if credentials are available
+        client_id = os.getenv("REDDIT_CLIENT_ID")
+        client_secret = os.getenv("REDDIT_CLIENT_SECRET")
+        
+        if not client_id or not client_secret:
+            logger.error("Reddit credentials not found in environment variables")
+            logger.error("Please set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET in .env file")
+            print("❌ Reddit credentials not found in environment variables")
+            print("Please set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET in .env file")
+            self.reddit = None
+            return
+        
+        logger.info(f"Found Reddit credentials - Client ID: {client_id[:8]}...")
+        
         try:
+            logger.info("Creating Reddit API client...")
             self.reddit = praw.Reddit(
-                client_id=os.getenv("REDDIT_CLIENT_ID"),
-                client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-                user_agent="ConcertMCPBot/1.0 by ConcertInfoBot",
-                username=os.getenv("REDDIT_USERNAME"),
-                password=os.getenv("REDDIT_PASSWORD")
+                client_id=client_id,
+                client_secret=client_secret,
+                user_agent="ConcertMCPBot/1.0 by ConcertInfoBot"
             )
-            # Test the connection
-            self.reddit.user.me()
+            logger.info("Reddit API client created successfully")
+            
+            # Test the connection by accessing a public subreddit
+            logger.info("Testing Reddit API connection...")
+            test_subreddit = self.reddit.subreddit("test")
+            subreddit_name = test_subreddit.display_name
+            logger.info(f"Successfully accessed subreddit: r/{subreddit_name}")
+            
+            # Test search functionality
+            logger.info("Testing Reddit search functionality...")
+            search_results = list(test_subreddit.search("test", limit=1))
+            logger.info(f"Search test successful - found {len(search_results)} results")
+            
+            print("✅ Reddit API connected successfully (OAuth2)")
+            logger.info("Reddit API initialization completed successfully")
+            
         except Exception as e:
-            print(f"Reddit authentication failed: {e}")
+            error_msg = f"Reddit authentication failed: {e}"
+            logger.error(error_msg)
+            logger.error("Please check your REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET")
+            print(f"❌ {error_msg}")
+            print("Please check your REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET")
             self.reddit = None
     
     def search_concerts(self, artist: str, location: str = None, date_range: str = "30") -> Dict[str, List[Dict]]:
         """Search for concert information across multiple subreddits"""
+        logger.info(f"Starting concert search for artist: '{artist}', location: '{location}'")
+        
         if not self.reddit:
-            return {"error": "Reddit API not initialized. Please check credentials."}
+            error_msg = "Reddit API not initialized. Please check credentials."
+            logger.error(error_msg)
+            return {"error": error_msg}
         
         results = {}
         search_terms = self._generate_search_terms(artist, location)
+        logger.info(f"Generated search terms: {search_terms}")
         
         for subreddit_name in CONCERT_SUBREDDITS:
+            logger.info(f"🔍 Searching r/{subreddit_name}...")
             try:
                 subreddit = self.reddit.subreddit(subreddit_name)
                 subreddit_results = []
                 
-                # Search in subreddit
-                for submission in subreddit.search(f"{artist} {location or ''}", 
-                                                time_filter="month", 
-                                                limit=10):
-                    if self._is_relevant_post(submission, artist, location):
-                        subreddit_results.append(self._extract_concert_info(submission))
+                logger.info(f"📝 Search parameters for r/{subreddit_name}:")
+                logger.info(f"   Search terms: {search_terms}")
+                logger.info(f"   Time filter: 'all' (no time restriction)")
+                logger.info(f"   Limit: 10 per search term")
+                logger.info(f"   Artist: '{artist}'")
+                logger.info(f"   Location: '{location or 'None'}'")
+                
+                # Search with multiple terms
+                search_count = 0
+                seen_posts = set()  # Avoid duplicates
+                
+                for search_query in search_terms[:3]:  # Try first 3 search terms
+                    print(f"\n🚀 EXECUTING REDDIT SEARCH:")
+                    print(f"   Subreddit: r/{subreddit_name}")
+                    print(f"   Query: '{search_query}'")
+                    print(f"   Time filter: all")
+                    print(f"   Limit: 10")
+                    print("=" * 50)
+                    
+                    logger.info(f"🚀 Executing Reddit search in r/{subreddit_name} with query: '{search_query}'")
+                    logger.info(f"🔗 Reddit API call: subreddit.search('{search_query}', time_filter='all', limit=10)")
+                    
+                    try:
+                        search_generator = subreddit.search(search_query, 
+                                                          time_filter="all", 
+                                                          limit=10)
+                        logger.info(f"📡 Reddit API response generator created for r/{subreddit_name}")
+                        
+                        for submission in search_generator:
+                            # Skip if we've already seen this post
+                            if submission.id in seen_posts:
+                                continue
+                            seen_posts.add(submission.id)
+                            
+                            search_count += 1
+                            print(f"🔍 REDDIT API RESULT #{search_count} in r/{subreddit_name}:")
+                            print(f"   Title: {submission.title}")
+                            print(f"   URL: https://reddit.com{submission.permalink}")
+                            print(f"   Score: {submission.score}, Author: {submission.author}")
+                            print(f"   Selftext: {submission.selftext[:100]}...")
+                            print()
+                            
+                            logger.debug(f"📄 Found submission #{search_count} in r/{subreddit_name}: {submission.title[:50]}...")
+                            logger.debug(f"   URL: https://reddit.com{submission.permalink}")
+                            logger.debug(f"   Score: {submission.score}, Author: {submission.author}")
+                            
+                            # Add all posts without filtering - let LLM decide relevance
+                            concert_info = self._extract_concert_info(submission)
+                            subreddit_results.append(concert_info)
+                            print(f"✅ ADDED TO RESULTS: {submission.title[:60]}...")
+                            logger.debug(f"✅ Added post: {submission.title[:50]}...")
+                                
+                    except Exception as search_error:
+                        logger.warning(f"⚠️ Search failed for query '{search_query}' in r/{subreddit_name}: {search_error}")
+                        continue
+                
+                logger.info(f"📊 r/{subreddit_name} results:")
+                logger.info(f"   Total posts found: {search_count}")
+                logger.info(f"   Posts added to results: {len(subreddit_results)}")
+                logger.info(f"   All posts included (no filtering)")
                 
                 if subreddit_results:
                     results[subreddit_name] = subreddit_results
+                    logger.info(f"✅ Added {len(subreddit_results)} posts from r/{subreddit_name} to results")
+                else:
+                    logger.info(f"📭 No relevant posts found in r/{subreddit_name}")
                     
             except Exception as e:
-                print(f"Error searching r/{subreddit_name}: {e}")
+                error_msg = f"❌ Error searching r/{subreddit_name}: {e}"
+                logger.error(error_msg)
+                logger.error(f"   Subreddit: r/{subreddit_name}")
+                logger.error(f"   Query: '{search_query}'")
+                logger.error(f"   Error type: {type(e).__name__}")
+                print(error_msg)
                 continue
         
+        total_posts = sum(len(posts) for posts in results.values())
+        logger.info(f"Concert search completed: {total_posts} posts found across {len(results)} subreddits (all posts included, no filtering)")
+        print(f"\n🎉 SEARCH COMPLETE: {total_posts} posts found across {len(results)} subreddits")
+        print("📝 All posts passed to LLM without filtering")
         return results
     
     def _generate_search_terms(self, artist: str, location: str = None) -> List[str]:
@@ -107,19 +224,38 @@ class RedditConcertScraper:
         
         # Must contain artist name
         if artist_lower not in text:
+            logger.debug(f"❌ Post doesn't contain artist '{artist_lower}': {submission.title[:50]}...")
             return False
         
         # If location specified, should contain location
         if location and location.lower() not in text:
+            logger.debug(f"❌ Post doesn't contain location '{location.lower()}': {submission.title[:50]}...")
             return False
         
-        # Look for concert-related keywords
+        # More flexible concert-related keywords (expanded list)
         concert_keywords = [
             "concert", "show", "tour", "festival", "setlist", "live", 
-            "venue", "tickets", "date", "time", "schedule", "lineup"
+            "venue", "tickets", "date", "time", "schedule", "lineup",
+            "performance", "gig", "event", "appearance", "playing", "stage",
+            "music", "song", "album", "release", "new", "upcoming", "announced"
         ]
         
-        return any(keyword in text for keyword in concert_keywords)
+        # Check for concert keywords
+        has_concert_keywords = any(keyword in text for keyword in concert_keywords)
+        
+        if has_concert_keywords:
+            logger.debug(f"✅ Post contains concert keywords: {submission.title[:50]}...")
+            return True
+        
+        # If no concert keywords, still allow if it's in a concert-related subreddit
+        # and contains the artist name (might be discussion, news, etc.)
+        concert_subreddits = ["concert", "edm", "livemusic", "UMF", "setlist", "festivals"]
+        if submission.subreddit.display_name.lower() in [s.lower() for s in concert_subreddits]:
+            logger.debug(f"✅ Post in concert subreddit without keywords: {submission.title[:50]}...")
+            return True
+        
+        logger.debug(f"❌ Post filtered out: {submission.title[:50]}...")
+        return False
     
     def _extract_concert_info(self, submission) -> Dict:
         """Extract relevant concert information from a Reddit post"""

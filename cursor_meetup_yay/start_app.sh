@@ -46,9 +46,9 @@ check_env() {
     fi
     
     # Check if .env has been configured (not just template values)
-    if grep -q "your_client_id_here" .env; then
+    if grep -q "your_client_id_here" .env || grep -q "your_openai_api_key_here" .env; then
         print_warning ".env file contains template values"
-        print_status "Please edit .env file with your Reddit API credentials before starting"
+        print_status "Please edit .env file with your API credentials before starting"
         print_status "Run: nano .env (or your preferred editor)"
         exit 1
     fi

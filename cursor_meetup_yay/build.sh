@@ -5,12 +5,11 @@ set -e
 if [ ! -f ".env" ]; then
   echo "Creating .env file..."
   cat > .env << EOF
-# Reddit API Credentials
+# Reddit API Credentials (OAuth2)
 # Get these from https://www.reddit.com/prefs/apps
+# Create a "script" type app and copy the client ID and secret
 REDDIT_CLIENT_ID=your_client_id_here
 REDDIT_CLIENT_SECRET=your_client_secret_here
-REDDIT_USERNAME=your_reddit_username
-REDDIT_PASSWORD=your_reddit_password
 
 # OpenAI API Key
 # Get this from https://platform.openai.com/api-keys
