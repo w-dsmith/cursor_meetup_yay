@@ -11,8 +11,12 @@ REDDIT_CLIENT_ID=your_client_id_here
 REDDIT_CLIENT_SECRET=your_client_secret_here
 REDDIT_USERNAME=your_reddit_username
 REDDIT_PASSWORD=your_reddit_password
+
+# OpenAI API Key
+# Get this from https://platform.openai.com/api-keys
+OPENAI_API_KEY=your_openai_api_key_here
 EOF
-  echo "[WARNING] Please edit .env file with your Reddit API credentials"
+  echo "[WARNING] Please edit .env file with your API credentials"
 else
   echo ".env file already exists"
 fi
